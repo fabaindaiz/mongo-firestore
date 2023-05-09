@@ -124,3 +124,7 @@ class MongoReference():
     def update(self, data: dict):
         data.pop("_id", None)
         self.collection.update_one(self._docId(), {"$set": data}, upsert=True)
+
+    def push(self, data:dict):
+        data.pop("_id", None)
+        self.collection.update_one(self._docId(), {"$push": data}, upsert=True)
