@@ -80,11 +80,21 @@ class MongoCollection():
         return MongoReference(collection=self.collection, docId=docId)
     
     def get(self):
-        result = self.collection.aggregate(self.pipeline)
-        self._reset()
-        return list(result)
+        return list(self.aggregate())
+    
+    def to_dict(self):
+        data = {}
+        for doc in self.aggregate():
+            id = doc.pop("_id", None)
+            data.update({id, doc})
+        return data
 
     # Agregation
+    def aggregate(self):
+        result = self.collection.aggregate(self.pipeline)
+        self._reset()
+        return result
+
     def where(self, *args):
         args = args[0] if len(args) == 1 else args
         self.pipeline.append({"$match": parse(args)})
@@ -113,6 +123,9 @@ class MongoReference():
 
     def get(self):
         return self.collection.find_one(self._docId())
+
+    def get_document(self):
+        return MongoDocument(self.collection.find_one(self._docId()))
     
     def delete(self):
         self.collection.delete_one(self._docId())
@@ -128,3 +141,15 @@ class MongoReference():
     def push(self, data:dict):
         data.pop("_id", None)
         self.collection.update_one(self._docId(), {"$push": data}, upsert=True)
+
+class MongoDocument():
+    def __init__(self, document):
+        self.document = document
+        self.exists = (document != None)
+
+    def to_dict(self):
+        return self.document
+
+    def get(self, query):
+        raise Exception("Not implemented")
+    
