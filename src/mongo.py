@@ -62,22 +62,38 @@ class MongoDatabase():
     """Represents a mongodb database"""
     def __init__(self, database: Database) -> None:
         self.database: Database = database
+        self.name: str = database.name
+
+    # Query
+    def list(self) -> list:
+        """Get a list of the collections in the database"""
+        return self.database.list_collection_names()
 
     def collection(self, name: str) -> 'MongoCollection':
         """Get a collection from a MongoDatabase"""
-        collection = self.database[name]
+        collection = self.database.get_collection(name)
         return MongoCollection(collection=collection)
 
 class MongoCollection():
     """Represents a mongodb collection"""
     def __init__(self, collection: Collection) -> None:
         self.collection: Collection = collection
+        self.database: Database = collection.database
+        self.name: str = collection.name
+
         self.pipeline: list = []
 
     def _reset(self) -> None:
         """Reset the agregation pipeline"""
         self.pipeline = []
+    
+    def _autoId(self) -> None:
+        """Create a new document and get his docId"""
+        result = self.collection.insert_one({})
+        #self.document(result.inserted_id).set({"_id": result.inserted_id})
+        return result.inserted_id
 
+    # Query
     def on_snapshot(self, on_snapshot: callable=None):
         """Watch changes in a collection"""
         pipeline = []
@@ -85,9 +101,19 @@ class MongoCollection():
         if on_snapshot:
             return Thread(target=_thread_change, args=(change_stream, on_snapshot)).start()
         return change_stream
+    
+    def count(self) -> str:
+        """Get the number of documents in the collection"""
+        return self.collection.count_documents()
 
-    def document(self, docId: str) -> 'MongoReference':
+    def delete(self) -> None:
+        """Drop the collection"""
+        self.collection.drop()
+
+    def document(self, docId: str=None) -> 'MongoReference':
         """Get a document reference from a MongoCollection"""
+        if not docId:
+            docId = self._autoId()
         return MongoReference(collection=self.collection, docId=docId)
     
     def get(self) -> None:
@@ -129,11 +155,17 @@ class MongoReference():
     def __init__(self, collection: Collection, docId: str) -> None:
         self.collection: Collection = collection
         self.docId: str = docId
-
+    
     def _docId(self) -> dict:
         """Get a dict with the mongo document id"""
         return {"_id": self.docId}
     
+    def _clean(self, data) -> dict:
+        """Clean data before insert them"""
+        data.pop("_id", None)
+        return data
+
+    # Query
     def on_snapshot(self, on_snapshot: callable=None):
         """Watch changes in a document"""
         pipeline = [{"$match": {"documentKey": self._docId()}}]
@@ -141,39 +173,40 @@ class MongoReference():
         if on_snapshot:
             return Thread(target=_thread_change, args=(change_stream, on_snapshot)).start()
         return change_stream
+    
+    def delete(self) -> None:
+        """Delete a mongodb doument"""
+        self.collection.delete_one(self._docId())
 
     def get(self) -> dict:
         """Get the document data as a dict"""
         return self.collection.find_one(self._docId())
 
-    def get_document(self) -> 'MongoDocument':
+    def get_snapshot(self) -> 'MongoDocument':
         """Get a document snapshot from a MongoReference"""
-        return MongoDocument(self.collection.find_one(self._docId()))
-    
-    def delete(self) -> None:
-        """Delete a mongodb doument"""
-        self.collection.delete_one(self._docId())
+        return MongoDocument(self.collection.find_one(self._docId()), self.docId)
     
     def set(self, data: dict) -> None:
         """Overwrite data in a mongodb doument"""
-        data.pop("_id", None)
+        data = self._clean(data)
         self.collection.replace_one(self._docId(), data, upsert=True)
 
     def update(self, data: dict) -> None:
         """Update data in a mongodb doument"""
-        data.pop("_id", None)
+        data = self._clean(data)
         self.collection.update_one(self._docId(), {"$set": data}, upsert=True)
 
     def push(self, data: dict) -> None:
         """Push values in a mongodb aray"""
-        data.pop("_id", None)
+        data = self._clean(data)
         self.collection.update_one(self._docId(), {"$push": data}, upsert=True)
 
 class MongoDocument():
     """Represents a mongodb document snapshot"""
-    def __init__(self, document: dict) -> None:
+    def __init__(self, document: dict, docId: str) -> None:
         self.document: dict = document
         self.exists: bool = (document != None)
+        self.docId: str = docId
 
     def to_dict(self) -> dict:
         """Get the document data as a dict"""
