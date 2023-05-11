@@ -1,12 +1,15 @@
-
-from pymongo import MongoClient
 from threading import Thread
+from pymongo import MongoClient
+from pymongo.database import Database
+from pymongo.collection import Collection
+from pymongo.command_cursor import CommandCursor
+from pymongo.change_stream import CollectionChangeStream
 
 
 # Utils
 
-# Esta función parsea las expresiones lógicas utilizando pattern matching
-def parse(args):
+def parse(args: list) -> dict:
+    """Parse logic expresions using pattern matching"""
     match args:
         # case 2
         case ["not", e]: return {"$not": parse(e)}
@@ -25,7 +28,8 @@ def parse(args):
         case ["or", *expr]: return {"$or": [parse(e) for e in expr]}
         case _: return args
 
-def _thread_change(change_stream, on_snapshot):
+def _thread_change(change_stream: CollectionChangeStream, on_snapshot: callable) -> None:
+    """Thread function for on_snapshot method in MongoCollection"""
     for change in change_stream:
         match on_snapshot.__code__.co_argcount:
             case 1:
@@ -45,111 +49,136 @@ def _thread_change(change_stream, on_snapshot):
 # Clases
 
 class MongoService():
-    def __init__(self, host, port, **kwargs):
-        self.client = MongoClient(host, port, **kwargs)
-        self.cfg = {}
+    """Represents a mongodb connetion"""
+    def __init__(self, host: str, port: int, **kwargs: dict) -> None:
+        self.client: MongoClient = MongoClient(host, port, **kwargs)
 
-    def database(self, name: str):
+    def database(self, name: str) -> 'MongoDatabase':
+        """Get a database from MongoService"""
         database = self.client[name]
         return MongoDatabase(database=database)
 
 class MongoDatabase():
-    def __init__(self, database):
-        self.database = database
+    """Represents a mongodb database"""
+    def __init__(self, database: Database) -> None:
+        self.database: Database = database
 
-    def collection(self, name: str):
+    def collection(self, name: str) -> 'MongoCollection':
+        """Get a collection from a MongoDatabase"""
         collection = self.database[name]
         return MongoCollection(collection=collection)
 
 class MongoCollection():
-    def __init__(self, collection):
-        self.collection = collection
+    """Represents a mongodb collection"""
+    def __init__(self, collection: Collection) -> None:
+        self.collection: Collection = collection
+        self.pipeline: list = []
+
+    def _reset(self) -> None:
+        """Reset the agregation pipeline"""
         self.pipeline = []
 
-    def _reset(self):
-        self.pipeline = []
-
-    def on_snapshot(self, on_snapshot=None):
+    def on_snapshot(self, on_snapshot: callable=None):
+        """Watch changes in a collection"""
         pipeline = []
         change_stream = self.collection.watch(pipeline)
         if on_snapshot:
             return Thread(target=_thread_change, args=(change_stream, on_snapshot)).start()
         return change_stream
 
-    def document(self, docId: str):
+    def document(self, docId: str) -> 'MongoReference':
+        """Get a document reference from a MongoCollection"""
         return MongoReference(collection=self.collection, docId=docId)
     
-    def get(self):
+    def get(self) -> None:
+        """Get a list with all collection documents"""
         return list(self.aggregate())
     
-    def to_dict(self):
+    def to_dict(self) -> dict:
+        """Get a dict with all collection documents"""
         data = {}
-        for doc in self.aggregate():
-            id = doc.pop("_id", None)
-            data.update({id, doc})
+        for document in self.aggregate():
+            data.update({document.pop("_id", None), document})
         return data
 
     # Agregation
-    def aggregate(self):
+    def aggregate(self) -> CommandCursor:
+        """Get a dictionary by applying a agregation pipeline"""
         result = self.collection.aggregate(self.pipeline)
         self._reset()
         return result
 
-    def where(self, *args):
+    def where(self, *args: list) -> 'MongoCollection':
+        """Add a match aggregation to pipeline"""
         args = args[0] if len(args) == 1 else args
         self.pipeline.append({"$match": parse(args)})
         return self
     
-    def order_by(self, name: int, order=1):
+    def order_by(self, name: int, order: int=1) -> 'MongoCollection':
+        """Add a sort aggregation to pipeline"""
         self.pipeline.append({"$sort": {name: order}})
+        return self
     
-    def limit(self, num: int):
+    def limit(self, num: int) -> 'MongoCollection':
+        """Add a limit aggregation to pipeline"""
         self.pipeline.append({"$limit": num})
+        return self
 
 class MongoReference():
-    def __init__(self, collection, docId):
-        self.collection = collection
-        self.docId = docId
+    """Represents a mongodb document reference"""
+    def __init__(self, collection: Collection, docId: str) -> None:
+        self.collection: Collection = collection
+        self.docId: str = docId
 
-    def _docId(self):
+    def _docId(self) -> dict:
+        """Get a dict with the mongo document id"""
         return {"_id": self.docId}
     
-    def on_snapshot(self, on_snapshot=None):
+    def on_snapshot(self, on_snapshot: callable=None):
+        """Watch changes in a document"""
         pipeline = [{"$match": {"documentKey": self._docId()}}]
         change_stream = self.collection.watch(pipeline)
         if on_snapshot:
             return Thread(target=_thread_change, args=(change_stream, on_snapshot)).start()
         return change_stream
 
-    def get(self):
+    def get(self) -> dict:
+        """Get the document data as a dict"""
         return self.collection.find_one(self._docId())
 
-    def get_document(self):
+    def get_document(self) -> 'MongoDocument':
+        """Get a document snapshot from a MongoReference"""
         return MongoDocument(self.collection.find_one(self._docId()))
     
-    def delete(self):
+    def delete(self) -> None:
+        """Delete a mongodb doument"""
         self.collection.delete_one(self._docId())
     
-    def set(self, data: dict):
+    def set(self, data: dict) -> None:
+        """Overwrite data in a mongodb doument"""
         data.pop("_id", None)
         self.collection.replace_one(self._docId(), data, upsert=True)
 
-    def update(self, data: dict):
+    def update(self, data: dict) -> None:
+        """Update data in a mongodb doument"""
         data.pop("_id", None)
         self.collection.update_one(self._docId(), {"$set": data}, upsert=True)
 
-    def push(self, data:dict):
+    def push(self, data: dict) -> None:
+        """Push values in a mongodb aray"""
         data.pop("_id", None)
         self.collection.update_one(self._docId(), {"$push": data}, upsert=True)
 
 class MongoDocument():
-    def __init__(self, document):
-        self.document = document
-        self.exists = (document != None)
+    """Represents a mongodb document snapshot"""
+    def __init__(self, document: dict) -> None:
+        self.document: dict = document
+        self.exists: bool = (document != None)
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
+        """Get the document data as a dict"""
         return self.document
 
-    def get(self, query):
+    def get(self, query) -> dict:
+        """Make a query on the document snapshot"""
         raise Exception("Not implemented")
-    
