@@ -49,7 +49,7 @@ def _thread_change(change_stream: CollectionChangeStream, on_snapshot: callable)
 # Clases
 
 class MongoService():
-    """Represents a mongodb connetion"""
+    """Represents a mongodb connection"""
     def __init__(self, host: str, port: int, **kwargs: dict) -> None:
         self.client: MongoClient = MongoClient(host, port, **kwargs)
 
