@@ -1,3 +1,3 @@
-# mongo-firestore
+# mongodb-python
 
-Queries mongodb with a firestore-like syntax
+Queries mongodb with a firestore-like syntax in python
