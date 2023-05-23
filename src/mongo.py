@@ -65,7 +65,7 @@ class MongoDatabase():
         self.name: str = database.name
 
     # Query
-    def list(self) -> list:
+    def list(self) -> list[str]:
         """Get a list of the collections in the database"""
         return self.database.list_collection_names()
 
@@ -81,7 +81,7 @@ class MongoCollection():
         self.database: Database = collection.database
         self.name: str = collection.name
 
-        self.pipeline: list = []
+        self.pipeline: list[dict] = []
 
     def _reset(self) -> None:
         """Reset the agregation pipeline"""
@@ -94,12 +94,12 @@ class MongoCollection():
         return result.inserted_id
 
     # Query
-    def on_snapshot(self, on_snapshot: callable=None):
+    def on_snapshot(self, on_snapshot: callable=None) -> CollectionChangeStream:
         """Watch changes in a collection"""
         pipeline = []
         change_stream = self.collection.watch(pipeline)
         if on_snapshot:
-            return Thread(target=_thread_change, args=(change_stream, on_snapshot)).start()
+            Thread(target=_thread_change, args=(change_stream, on_snapshot)).start()
         return change_stream
     
     def count(self) -> str:
@@ -116,7 +116,7 @@ class MongoCollection():
             docId = self._autoId()
         return MongoReference(collection=self.collection, docId=docId)
     
-    def get(self) -> None:
+    def get(self) -> list[dict]:
         """Get a list with all collection documents"""
         return list(self.aggregate())
     
@@ -156,7 +156,7 @@ class MongoReference():
         self.collection: Collection = collection
         self.docId: str = docId
     
-    def _docId(self) -> dict:
+    def _docId(self) -> dict[str,str]:
         """Get a dict with the mongo document id"""
         return {"_id": self.docId}
     
